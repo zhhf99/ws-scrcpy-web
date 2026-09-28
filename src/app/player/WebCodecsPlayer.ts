@@ -98,6 +98,11 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
     private static readonly MAX_KEYFRAME_REQUESTS = 3;
     private keyframeRequests = 0;
 
+    private glCanvas: HTMLCanvasElement;
+    private gl: WebGLRenderingContext;
+    private glProgram: WebGLProgram;
+    private glTexture: WebGLTexture;
+
     constructor(udid: string, displayInfo?: DisplayInfo, name = WebCodecsPlayer.playerFullName) {
         super(udid, displayInfo, name, WebCodecsPlayer.storageKeyPrefix);
         const context = this.tag.getContext('2d');
@@ -106,7 +111,77 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
         }
         this.context = context;
         this.decoder = this.createDecoder();
+
+        this.glCanvas = document.createElement('canvas');
+        const gl = this.glCanvas.getContext('webgl', { premultipliedAlpha: false });
+        if (!gl) throw new Error('WebGL unavailable');
+        this.gl = gl;
+
+        const vsSrc = `
+        attribute vec2 a_pos;
+        varying vec2 v_uv;
+        void main() {
+            v_uv = (a_pos + 1.0) * 0.5;
+            v_uv.y = 1.0 - v_uv.y;              // 与 VideoFrame 的 Y 方向对齐
+            gl_Position = vec4(a_pos, 0.0, 1.0);
+        }`;
+
+        const fsSrc = `
+        precision mediump float;
+        varying vec2 v_uv;
+        uniform sampler2D u_tex;
+
+        float sRGBToLinear(float c) {
+            if (c <= 0.03928) return c / 12.92;
+            return pow((c + 0.055) / 1.055, 2.4);
+        }
+        float linearToSRGB(float c) {
+            if (c <= 0.0031308) return c * 12.92;
+            return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+        }
+
+        void main() {
+            vec4 color = texture2D(u_tex, v_uv);
+            float r = sRGBToLinear(color.r);
+            float g = sRGBToLinear(color.g);
+            float b = sRGBToLinear(color.b);
+            float Y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            float gray = linearToSRGB(Y);
+            gl_FragColor = vec4(gray, gray, gray, color.a);
+        }`;
+
+        const compile = (type: number, src: string) => {
+            const s = gl.createShader(type)!;
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            return s;
+        };
+        const prog = gl.createProgram()!;
+        gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSrc));
+        gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSrc));
+        gl.linkProgram(prog);
+        gl.useProgram(prog);
+        this.glProgram = prog;
+
+        // 全屏三角形/四边形
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER,
+            new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+        const loc = gl.getAttribLocation(prog, 'a_pos');
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+        // 视频纹理
+        this.glTexture = gl.createTexture()!;
+        gl.bindTexture(gl.TEXTURE_2D, this.glTexture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
     }
+
 
     private createDecoder(): VideoDecoder {
         return new VideoDecoder({
@@ -525,13 +600,26 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
                 const frame: VideoFrame = data.frame;
                 const cw = this.tag.width;
                 const ch = this.tag.height;
-                // Edge H.265: displayWidth differs from codedWidth. Use full coded
-                // rect as source to draw the complete frame, not just the visible rect.
-                if (frame.displayWidth !== frame.codedWidth || frame.displayHeight !== frame.codedHeight) {
-                    this.context.drawImage(frame, 0, 0, frame.codedWidth, frame.codedHeight, 0, 0, cw, ch);
-                } else {
-                    this.context.drawImage(frame, 0, 0);
+
+                // 更新离屏 WebGL canvas 尺寸（与主 canvas 一致）
+                if (this.glCanvas.width !== cw || this.glCanvas.height !== ch) {
+                    this.glCanvas.width = cw;
+                    this.glCanvas.height = ch;
+                    this.gl.viewport(0, 0, cw, ch);
                 }
+
+                // VideoFrame → WebGL 纹理
+                this.gl.bindTexture(this.gl.TEXTURE_2D, this.glTexture);
+                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA,
+                    this.gl.RGBA, this.gl.UNSIGNED_BYTE, frame);
+
+                // 跑 WCAG 着色器
+                this.gl.useProgram(this.glProgram);
+                this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+                // 结果贴到主 canvas
+                this.context.drawImage(this.glCanvas, 0, 0);
+
                 frame.close();
             }
         }
