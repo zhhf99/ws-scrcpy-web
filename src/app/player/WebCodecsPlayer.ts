@@ -1,16 +1,16 @@
-import type { DisplayInfo } from '../DisplayInfo';
+import type {DisplayInfo} from '../DisplayInfo';
 import Rect from '../Rect';
 import ScreenInfo from '../ScreenInfo';
 import Size from '../Size';
 import VideoSettings from '../VideoSettings';
-import { OBU_TYPE, obuType, parseAv1ConfigRecord, parseAv1SequenceHeader } from './av1-utils';
-import { BaseCanvasBasedPlayer } from './BaseCanvasBasedPlayer';
-import { BasePlayer } from './BasePlayer';
-import { decodeWatchdogMessage, detectBrowserFamily } from './decodeWatchdogMessage';
-import { parseSPS, stripEmulationPrevention } from './h264-utils';
-import { HEVC_NAL_TYPE, hevcNalType, parseHevcSPS } from './h265-utils';
-import { annexBToLengthPrefixed, findFirstNaluOffset, findNaluByHeader } from './naluScanner';
-import { buildDecoderConfig, isConfiglessCodec, type VideoCodecName, WEBCODECS_CODEC_STRING } from './webCodecsConfig';
+import {OBU_TYPE, obuType, parseAv1ConfigRecord, parseAv1SequenceHeader} from './av1-utils';
+import {BaseCanvasBasedPlayer} from './BaseCanvasBasedPlayer';
+import {BasePlayer} from './BasePlayer';
+import {decodeWatchdogMessage, detectBrowserFamily} from './decodeWatchdogMessage';
+import {parseSPS, stripEmulationPrevention} from './h264-utils';
+import {HEVC_NAL_TYPE, hevcNalType, parseHevcSPS} from './h265-utils';
+import {annexBToLengthPrefixed, findFirstNaluOffset, findNaluByHeader} from './naluScanner';
+import {buildDecoderConfig, isConfiglessCodec, type VideoCodecName, WEBCODECS_CODEC_STRING} from './webCodecsConfig';
 
 function toHex(value: number) {
     return value.toString(16).padStart(2, '0').toUpperCase();
@@ -60,7 +60,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
         const height =
             (2 - frame_mbs_only_flag) * (pic_height_in_map_units_minus1 + 1) * 16 -
             (frame_mbs_only_flag ? 2 : 4) * (frame_crop_top_offset + frame_crop_bottom_offset);
-        return { codec, width, height };
+        return {codec, width, height};
     }
 
     public override readonly supportsScreenshot = true;
@@ -113,7 +113,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
         this.decoder = this.createDecoder();
 
         this.glCanvas = document.createElement('canvas');
-        const gl = this.glCanvas.getContext('webgl', { premultipliedAlpha: false });
+        const gl = this.glCanvas.getContext('webgl', {premultipliedAlpha: false});
         if (!gl) throw new Error('WebGL unavailable');
         this.gl = gl;
 
@@ -167,7 +167,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
         const buf = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.bufferData(gl.ARRAY_BUFFER,
-            new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+            new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
         const loc = gl.getAttribLocation(prog, 'a_pos');
         gl.enableVertexAttribArray(loc);
         gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
@@ -237,7 +237,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
             this.detectedCodec = codec;
             this.configureFromMetadata(codec);
         }
-        this.emit('video-stalled', { codec: codec ?? 'unknown', reason });
+        this.emit('video-stalled', {codec: codec ?? 'unknown', reason});
     }
 
     /**
@@ -269,7 +269,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
                     console.error(
                         '[WebCodecsPlayer]',
                         `${codec}: video is arriving but the decoder was never configured — the config packet was ` +
-                            'missing or unusable. Requesting a fresh keyframe, which brings a new config packet with it.',
+                        'missing or unusable. Requesting a fresh keyframe, which brings a new config packet with it.',
                     );
                 } else {
                     console.error(
@@ -292,7 +292,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
                     '[WebCodecsPlayer]',
                     `${codec}: requesting a fresh keyframe (attempt ${this.keyframeRequests}/${WebCodecsPlayer.MAX_KEYFRAME_REQUESTS})`,
                 );
-                this.emit('video-stalled', { codec, reason: 'no-frames' });
+                this.emit('video-stalled', {codec, reason: 'no-frames'});
                 this.armDecodeWatchdog(codec);
             }
         }, WebCodecsPlayer.DECODE_WATCHDOG_MS);
@@ -334,7 +334,8 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
                     this.scaleCanvas(displayW, displayH);
                 }
                 if (this.decoder.state === 'configured') {
-                    this.decoder.flush().catch(() => {});
+                    this.decoder.flush().catch(() => {
+                    });
                 }
                 // Supply SPS/PPS (and VPS for H.265) once via `description` so the
                 // per-frame keyframe path no longer concatenates config + frame data.
@@ -431,7 +432,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
             const configRecord = parseAv1ConfigRecord(data);
             if (configRecord) {
                 this.detectedCodec = 'av1';
-                return { ...configRecord, width: 0, height: 0 };
+                return {...configRecord, width: 0, height: 0};
             }
             // Try raw OBU Sequence Header
             if (obuType(data[0]!) === OBU_TYPE.SEQUENCE_HEADER) {
@@ -610,8 +611,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
 
                 // VideoFrame → WebGL 纹理
                 this.gl.bindTexture(this.gl.TEXTURE_2D, this.glTexture);
-                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA,
-                    this.gl.RGBA, this.gl.UNSIGNED_BYTE, frame);
+                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, frame);
 
                 // 跑 WCAG 着色器
                 this.gl.useProgram(this.glProgram);
